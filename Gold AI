@@ -1,0 +1,91 @@
+# GOLD AI V12 FIXED - WORKS IN COLAB - NO XAUUSD ERROR
+import yfinance as yf, urllib.request, urllib.parse, datetime, os
+
+WHATSAPP_PHONE = "+256788408267" # EDIT
+APIKEY = "6265853" # EDIT
+NTFY_TOPIC = "gold-ai-ug-788408267" # YOUR TOPIC
+
+def send_all(m):
+  try:
+    txt = urllib.parse.quote_plus(m[:950])
+    urllib.request.urlopen(f"https://api.callmebot.com/whatsapp.php?phone={WHATSAPP_PHONE}&text={txt}&apikey={APIKEY}", timeout=15).read()
+  except Exception as e: print("WA", e)
+  try:
+    req = urllib.request.Request(f"https://ntfy.sh/{NTFY_TOPIC}", data=m.encode('utf-8'), method='POST')
+    req.add_header("Title", "GOLD 100% VALID"); req.add_header("Priority", "high")
+    print("NTFY", urllib.request.urlopen(req, timeout=10).read().decode()[:80])
+  except Exception as e: print("NTFY", e)
+
+TICKER = "GC=F"  # Futures - RELIABLE, never 404
+DXY="DX-Y.NYB"; US10Y="^TNX"
+
+# DAILY HLC - EXACT YOUR FORMULA FROM DAILY TIMEFRAME
+daily = yf.download(TICKER, period="10d", interval="1d", auto_adjust=True, progress=False)
+print(daily.tail(3))
+if len(daily) < 2:
+  print("ERROR daily empty, retry"); daily = yf.download(TICKER, period="15d", interval="1d", auto_adjust=True, progress=False)
+
+H = float(daily['High'].iloc[-2])
+L = float(daily['Low'].iloc[-2])
+C = float(daily['Close'].iloc[-2])
+print(f"\nDAILY (YESTERDAY) H {H:.2f} L {L:.2f} C {C:.2f}")
+
+# YOUR EXACT FORMULAS
+POC = (H + L + C) / 3.0
+RNG = H - L
+VAH = POC + RNG * 0.15
+VAL = POC - RNG * 0.15
+print(f"POC {POC:.2f} = (H+L+C)/3 | RNG {RNG:.2f} | VAH {VAH:.2f} | VAL {VAL:.2f}")
+
+# 15M
+m15 = yf.download(TICKER, period="5d", interval="15m", auto_adjust=True, progress=False)
+gold_fut = float(m15['Close'].iloc[-1])
+# Convert futures to spot (real broker) - current basis ~22$
+# This makes prices match your MT4/MT5
+BASIS = 21.0
+gold = gold_fut - BASIS
+print(f"FUTURES {gold_fut:.2f} -> SPOT (broker) {gold:.2f} (-{BASIS})")
+
+ema_red = float(m15['Close'].ewm(span=50).mean().iloc[-1])
+ema_s = m15['Close'].ewm(span=50).mean()
+bulls_now = float(m15['High'].iloc[-1] - ema_s.iloc[-1])
+bulls_prev = float(m15['High'].iloc[-2] - ema_s.iloc[-2])
+bullish_key = float(m15['Low'].iloc[-1]) > float(m15['Low'].iloc[-2]) or gold_fut > float(m15['High'].iloc[-2])
+bearish_key = float(m15['High'].iloc[-1]) < float(m15['High'].iloc[-2]) or gold_fut < float(m15['Low'].iloc[-2])
+
+dxy_m15=yf.download(DXY,period="5d",interval="15m",auto_adjust=True,progress=False)
+tnx_m15=yf.download(US10Y,period="5d",interval="15m",auto_adjust=True,progress=False)
+dxy_now=float(dxy_m15['Close'].iloc[-1]); dxy_ema=float(dxy_m15['Close'].ewm(span=50).mean().iloc[-1])
+us10y_down=float(tnx_m15['Close'].iloc[-1])<float(tnx_m15['Close'].iloc[-5])
+
+atr=float((m15['High']-m15['Low']).rolling(14).mean().iloc[-1])
+now_utc=datetime.datetime.utcnow()
+red_news_block = 12 <= now_utc.hour < 13
+
+def calc_levels(entry, is_buy=True):
+  if is_buy: return entry-(atr*1.2), entry+(atr*1.0), entry+(atr*1.5), entry+(atr*2.0), entry+(atr*3.0), entry+(atr*4.0)
+  else: return entry+(atr*1.2), entry-(atr*1.0), entry-(atr*1.5), entry-(atr*2.0), entry-(atr*3.0), entry-(atr*4.0)
+
+def send_valid(name,total):
+  if red_news_block: print("⛔ NEWS BLOCK"); return
+  is_buy="BUY" in name
+  # For SL/BE/TP we use spot price (gold) to match broker
+  sl,be,tp1,tp2,tp3,tp4 = calc_levels(gold, is_buy)
+  # Convert VAH/POC/VAL to spot too
+  poc_s = POC - BASIS; vah_s = VAH - BASIS; val_s = VAL - BASIS
+  msg=f"🚀 {name} {total}/{total} 100% VALID\nENTRY SPOT M15 {gold:.2f} (FUT {gold_fut:.2f})\nSL 1.2x {sl:.2f}\nBE 1x {be:.2f}\nTP1 1.5x {tp1:.2f}\nTP2 2x {tp2:.2f}\nTP3 3x {tp3:.2f}\nTP4 4x {tp4:.2f}\nATR {atr:.2f}\nPOC {poc_s:.2f} VAH {vah_s:.2f} VAL {val_s:.2f} (SPOT)\nFUT DAILY H {H:.2f} L {L:.2f} C {C:.2f}"
+  print("\n"+msg+"\n"); send_all(msg)
+
+# CHECKS
+e_score=sum([gold_fut>ema_red, (bulls_prev<0 and bulls_now>0) or bulls_now>0, bullish_key, dxy_now<dxy_ema, bulls_now>0 and not red_news_block])
+print(f"\nE-FAR BUY {e_score}/5")
+if e_score==5 and bullish_key and gold_fut>VAL: send_valid("E-FAR BUY",5)
+
+a_score=sum([gold_fut>ema_red, bulls_now>0.5, (bulls_prev<=0.5 and bulls_now>0.5) or bulls_now>0.5, bullish_key, VAL-10<=gold_fut<=POC+10, (dxy_now<dxy_ema) and us10y_down, bulls_now>0 and not red_news_block])
+print(f"A-BUY {a_score}/7")
+if a_score==7: send_valid("A-BUY VAL/POC",7)
+
+b_score=sum([VAL-25<=gold_fut<=VAH+25 or abs(gold_fut-VAH)<30, (bulls_prev<=0.5 and bulls_now>0.5) or bulls_now>0.5, bullish_key, bulls_now>0 and not red_news_block])
+print(f"B-BUY {b_score}/4")
+
+print(f"\nDone - Spot {gold:.2f} matches broker, FUT {gold_fut:.2f}")
