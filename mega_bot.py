@@ -146,13 +146,13 @@ def rsi_calc(s,p=14):
 async def get_candles(sym,gran=60):
     for DERIV_WS in DERIV_WS_LIST:
         try:
-            async with websockets.connect(DERIV_WS, extra_headers={"Origin":"https://github.com"}) as ws:
+            async with websockets.connect(DERIV_WS) as ws:
                 await ws.send(json.dumps({"ticks_history":sym,"adjust_start_time":1,"count":120,"end":"latest","granularity":gran,"style":"candles"}))
                 resp=json.loads(await ws.recv())
                 if "candles" in resp:
                     return pd.DataFrame(resp["candles"])
         except Exception as e:
-            print(f"WS fail {e}")
+            print(f"WS {DERIV_WS} fail {e}")
             continue
     return None
 
