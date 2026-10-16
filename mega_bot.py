@@ -7,7 +7,11 @@ APIKEY = "6265853"
 NTFY_TOPIC = "gold-ai-ug-788408267"
 SYMBOLS_VOL = ["1HZ10V", "1HZ25V"]  # 1s version - best
 APP_ID = "1089"
-DERIV_WS = f"wss://ws.derivws.com/websockets/v3?app_id={APP_ID}"
+DERIV_WS_LIST = [
+    f"wss://ws.derivws.com/websockets/v3?app_id={APP_ID}",
+    f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}",
+    f"wss://ws.deriv.com/websockets/v3?app_id={APP_ID}"
+]
 STATS_FILE = "stats.json"
 
 def send_all(title, body):
@@ -140,11 +144,17 @@ def rsi_calc(s,p=14):
     delta=s.diff(); gain=(delta.where(delta>0,0)).ewm(alpha=1/p).mean(); loss=(-delta.where(delta<0,0)).ewm(alpha=1/p).mean(); rs=gain/loss; return 100-(100/(1+rs))
 
 async def get_candles(sym,gran=60):
-    async with websockets.connect(DERIV_WS) as ws:
-        await ws.send(json.dumps({"ticks_history":sym,"adjust_start_time":1,"count":120,"end":"latest","granularity":gran,"style":"candles"}))
-        resp=json.loads(await ws.recv())
-        if "candles" not in resp: return None
-        return pd.DataFrame(resp["candles"])
+    for DERIV_WS in DERIV_WS_LIST:
+        try:
+            async with websockets.connect(DERIV_WS, extra_headers={"Origin":"https://github.com"}) as ws:
+                await ws.send(json.dumps({"ticks_history":sym,"adjust_start_time":1,"count":120,"end":"latest","granularity":gran,"style":"candles"}))
+                resp=json.loads(await ws.recv())
+                if "candles" in resp:
+                    return pd.DataFrame(resp["candles"])
+        except Exception as e:
+            print(f"WS fail {e}")
+            continue
+    return None
 
 async def analyze_vol(sym):
     df=await get_candles(sym,60)
