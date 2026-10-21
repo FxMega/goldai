@@ -1,8 +1,9 @@
 import yfinance as yf,pandas as pd,requests,time
 from datetime import datetime,timezone
-TOPIC="gold-ai-ug-788408267";URL=f"https://ntfy.sh/{TOPIC}";BRAND="FXMEGA v13.2 LIVE 5SEC";GOLD_OFF=21.43;SILVER_OFF=0.12;DXY="DX-Y.NYB"
+TOPIC="gold-ai-ug-788408267";URL=f"https://ntfy.sh/{TOPIC}";BRAND="FXMEGA v13.3 FIX BINANCE BLOCK";GOLD_OFF=21.43;SILVER_OFF=0.12;DXY="DX-Y.NYB"
 BINANCE_CRYPTO={"BITCOIN":"BTCUSDT","ETHEREUM":"ETHUSDT","SOLANA":"SOLUSDT","BNB":"BNBUSDT","XRP":"XRPUSDT","DOGECOIN":"DOGEUSDT"}
 BINANCE_GOLD={"GOLD":"PAXGUSDT","SILVER":"XAGUSDT"}
+BINANCE_URLS=["https://data-api.binance.vision/api/v3/klines","https://api1.binance.com/api/v3/klines","https://api2.binance.com/api/v3/klines","https://api3.binance.com/api/v3/klines","https://api.binance.com/api/v3/klines"]
 def news():
  b=set()
  try:
@@ -15,14 +16,17 @@ def news():
  except:pass
  return b
 def binance_df(sym):
- try:
-  url=f"https://api.binance.com/api/v3/klines?symbol={sym}&interval=15m&limit=100"
-  r=requests.get(url,timeout=10).json()
-  if isinstance(r,dict) and "code" in r:return pd.DataFrame()
-  df=pd.DataFrame(r,columns=["Ot","Op","H","L","C","V","Ct","QV","Tr","TB","TQ","I"])
-  df['Open']=pd.to_numeric(df['Op']);df['High']=pd.to_numeric(df['H']);df['Low']=pd.to_numeric(df['L']);df['Close']=pd.to_numeric(df['C']);time.sleep(1)
-  return df
- except:return pd.DataFrame()
+ for base in BINANCE_URLS:
+  try:
+   url=f"{base}?symbol={sym}&interval=15m&limit=100"
+   r=requests.get(url,timeout=10).json()
+   if isinstance(r,dict) and "code" in r:continue
+   if not r or len(r)<50:continue
+   df=pd.DataFrame(r,columns=["Ot","Op","H","L","C","V","Ct","QV","Tr","TB","TQ","I"])
+   df['Open']=pd.to_numeric(df['Op']);df['High']=pd.to_numeric(df['H']);df['Low']=pd.to_numeric(df['L']);df['Close']=pd.to_numeric(df['C'])
+   print(f"{sym} OK from {base}");time.sleep(1);return df
+  except Exception as e:print(f"{sym} fail {base} {e}");continue
+ return pd.DataFrame()
 def yahoo_df(L):
  for s in L:
   try:
@@ -49,9 +53,7 @@ def gdxy():
   c=d['Close'];e=c.ewm(span=13).mean();return float(c.iloc[-1]),float(e.iloc[-1]),float(c.iloc[-1])<float(e.iloc[-1]),float(c.iloc[-1])>float(e.iloc[-1]),float(e.iloc[-1])<float(e.iloc[-2]),float(e.iloc[-1])>float(e.iloc[-2])
  except:return None,None,False,False,False,False
 def send(m,buy=True):
- try:
-  requests.post(URL,data=m.encode('utf-8'),headers={"Title":f"{'BUY' if buy else 'SELL'} - {BRAND}","Priority":"high"},timeout=10)
-  time.sleep(5)
+ try:requests.post(URL,data=m.encode('utf-8'),headers={"Title":f"{'BUY' if buy else 'SELL'} - {BRAND}","Priority":"high"},timeout=10);time.sleep(5)
  except:pass
 def ff(x):
  try:return float(x.iloc[0]) if hasattr(x,'iloc') else float(x)
@@ -67,19 +69,20 @@ else:
   if name in BINANCE_GOLD:
    src="BINANCE LIVE";df=binance_df(BINANCE_GOLD[name])
    if df.empty and name=="SILVER":src="YAHOO SILVER LIVE";df,_=yahoo_df(["SI=F"]);off=SILVER_OFF
-   elif df.empty:print(f"{name} NO DATA");continue
+   elif df.empty:print(f"{name} NO DATA after all Binance URLs");continue
    else:off=GOLD_OFF if name=="GOLD" else SILVER_OFF
   elif name in BINANCE_CRYPTO:
    src="BINANCE LIVE";df=binance_df(BINANCE_CRYPTO[name])
-   if df.empty:print(f"{name} NO DATA");continue
+   if df.empty:print(f"{name} NO DATA after all Binance URLs");continue
   else:
-   src="YAHOO FOREX";df,_=yahoo_df([f"{name}=X"]); 
+   src="YAHOO FOREX";df,_=yahoo_df([f"{name}=X"])
   if df.empty:continue
   close=df['Close'];high=df['High'];low=df['Low'];op=df['Open']
   cur=ff(close.iloc[-1]);hnow=ff(high.iloc[-1]);lnow=ff(low.iloc[-1]);o=ff(op.iloc[-1]);hp=ff(high.iloc[-2]);lp=ff(low.iloc[-2])
   if off>0:cur-=off;hnow-=off;lnow-=off;o-=off;hp-=off;lp-=off
-  pdh=ff((high-off if off>0 else high).iloc[-97:-1].max()) if off>0 else ff(high.iloc[-97:-1].max());pdl=ff((low-off if off>0 else low).iloc[-97:-1].min()) if off>0 else ff(low.iloc[-97:-1].min());mid=(pdh+pdl)/2
-  tr=pd.concat([df['High']-df['Low'],(df['High']-df['Close'].shift()).abs(),(df['Low']-df['Close'].shift()).abs()],axis=1).max(axis=1);atr=ff(tr.rolling(14).mean().iloc[-1])
+  pdh=ff((high if off==0 else high).iloc[-97:-1].max());pdl=ff((low if off==0 else low).iloc[-97:-1].min())
+  if off>0:pdh-=off;pdl-=off
+  mid=(pdh+pdl)/2;tr=pd.concat([df['High']-df['Low'],(df['High']-df['Close'].shift()).abs(),(df['Low']-df['Close'].shift()).abs()],axis=1).max(axis=1);atr=ff(tr.rolling(14).mean().iloc[-1])
   if atr<cur*0.005:atr=cur*0.005
   e13=close.ewm(span=13).mean();e50=close.ewm(span=50).mean();en=ff(e13.iloc[-1]);ep=ff(e13.iloc[-2]);e50n=ff(e50.iloc[-1])
   if off>0:en-=off;ep-=off;e50n-=off
@@ -103,6 +106,6 @@ else:
    bos_u=cur>pdh;bos_d=cur<pdl;ret_b=abs(cur-pdh)<atr*0.8 and bos_u;ret_s=abs(cur-pdl)<atr*0.8 and bos_d;buy=ret_b and en>e50n and up and rsi_now>50;sell=ret_s and en<e50n and down and rsi_now<50;strat=f"CRYPTO {src} BREAK+RETEST"
   print(f"{name} {strat} E {fmt(cur)} LIVE {fmt(cur)} RSI {rsi_now:.1f} B:{buy} S:{sell}")
   if buy or sell:
-   side="BUY" if buy else "SELL";e=cur;sl=e-1.5*atr if side=="BUY" else e+1.5*atr;t1=e+1*atr if side=="BUY" else e-1*atr;t2=e+2*atr if side=="BUY" else e-2*atr;msg=f"{side} {name} v13.2 {strat} ENTRY {fmt(e)} LIVE {fmt(e)} SL {fmt(sl)} TP1 {fmt(t1)} TP2 {fmt(t2)} ATR {fmt(atr)} RSI {rsi_now:.1f}"
+   side="BUY" if buy else "SELL";e=cur;sl=e-1.5*atr if side=="BUY" else e+1.5*atr;t1=e+1*atr if side=="BUY" else e-1*atr;t2=e+2*atr if side=="BUY" else e-2*atr;msg=f"{side} {name} v13.3 {strat} ENTRY {fmt(e)} LIVE {fmt(e)} SL {fmt(sl)} TP1 {fmt(t1)} TP2 {fmt(t2)} ATR {fmt(atr)} RSI {rsi_now:.1f}"
    send(msg,buy)
-print("DONE v13.2 - 5SEC delay + 1SEC between Binance calls - ALL LIVE")
+print("DONE v13.3 - FIXED Binance block via data-api.binance.vision + 5SEC + 1SEC")
