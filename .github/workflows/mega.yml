@@ -1,22 +1,35 @@
-name: MEGA BOT V3 NEWS FILTER
+name: FXMEGA v13.1 LIVE ALL
+
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *'  # Every 15 min = Binance live candle
   workflow_dispatch:
+
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install yfinance pandas websockets requests
-      - run: python mega_bot.py
-      - name: Save stats
+
+      - name: Install deps
         run: |
-          git config user.name "bot"
-          git config user.email "bot@fxmega.ug"
-          git add stats.json || true
-          git commit -m "update stats" || true
+          pip install --upgrade pip
+          pip install yfinance pandas requests
+
+      - name: Run FXMEGA v13.1 LIVE - Binance + Yahoo
+        run: |
+          python mega_bot.py
+
+      - name: Commit logs if any
+        run: |
+          git config --global user.name "FXMEGA Bot"
+          git config --global user.email "bot@fxmega.ug"
+          git add -A || true
+          git diff --staged --quiet || git commit -m "v13.1 live run $(date -u)" || true
           git push || true
